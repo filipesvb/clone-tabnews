@@ -3,37 +3,48 @@ import { join } from "node:path";
 import database from "infra/database.js";
 
 export default async function migrations(request, response) {
-  const dbClient = await database.getClient();
-  const defaultConfig = {
-    dbClient,
-    dir: join("infra", "migrations"),
-    dryRun: true,
-    verbose: true,
-    direction: "up",
-    migrationsTable: "pgmigrations",
-  };
+  const allowedMethods = ["GET", "POST"];
 
-  if (request.method === "GET") {
-    const pendingMigrations = await migrationRunner(defaultConfig);
-
-    dbClient.end();
-
-    return response.status(200).json(pendingMigrations);
+  if (!allowedMethods.includes(request.method)) {
+    return response.status(405).json({
+      error: `Method "${request.method}" not allowed`,
+    });
   }
 
-  if (request.method === "POST") {
-    const migratedMigrations = await migrationRunner({
-      ...defaultConfig,
-      dryRun: false,
-    });
+  let dbClient;
 
-    dbClient.end();
-    if (migratedMigrations.length > 0) {
-      return response.status(201).json(migratedMigrations);
+  try {
+    dbClient = await database.getClient();
+    const defaultConfig = {
+      dbClient,
+      dir: join("infra", "migrations"),
+      dryRun: true,
+      verbose: true,
+      direction: "up",
+      migrationsTable: "pgmigrations",
+    };
+
+    if (request.method === "GET") {
+      const pendingMigrations = await migrationRunner(defaultConfig);
+      return response.status(200).json(pendingMigrations);
     }
 
-    return response.status(200).json(migratedMigrations);
-  }
+    if (request.method === "POST") {
+      const migratedMigrations = await migrationRunner({
+        ...defaultConfig,
+        dryRun: false,
+      });
 
-  response.status(405);
+      if (migratedMigrations.length > 0) {
+        return response.status(201).json(migratedMigrations);
+      }
+
+      return response.status(200).json(migratedMigrations);
+    }
+  } catch (error) {
+    console.log(error);
+    throw error;
+  } finally {
+    await dbClient.end();
+  }
 }
